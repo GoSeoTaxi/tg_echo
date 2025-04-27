@@ -1,0 +1,63 @@
+name: build-and-deploy
+on:
+  push:
+    branches: [ main, dev ]
+
+env:
+  IMAGE_NAME: tg_echo
+  PORT: ${{ vars.PORT }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: ${{ env.IMAGE_NAME }}:latest
+          load: true
+
+      - run: docker save ${{ env.IMAGE_NAME }}:latest -o image.tar
+
+      - name: Fix permissions for image.tar
+        run: chmod 644 image.tar
+
+      - name: Ensure remote dir exists
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: mkdir -p ~/tg_echo
+
+      - name: Copy to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: image.tar
+          target: ~/tg_echo/
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/tg_echo
+            docker load -i image.tar
+            docker rm -f tg_echo || true
+            docker run -d --name tg_echo --restart=unless-stopped \
+              -e BOT_TOKEN='${{ secrets.BOT_TOKEN }}' \
+              -e CHAT_ID='${{ secrets.CHAT_ID }}' \
+              -e PORT='${{ vars.PORT }}' \
+              -e LOG_LEVEL='${{ vars.LOG_LEVEL }}' \
+              -p ${{ vars.PORT }}:${{ vars.PORT }} \
+              tg_echo:latest
