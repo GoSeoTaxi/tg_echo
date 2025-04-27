@@ -24,6 +24,9 @@ jobs:
 
       - run: docker save ${{ env.IMAGE_NAME }}:latest -o image.tar
 
+      - name: Fix permissions for image.tar
+        run: chmod 644 image.tar
+
       - name: Ensure remote dir exists
         uses: appleboy/ssh-action@v1.0.3
         with:
