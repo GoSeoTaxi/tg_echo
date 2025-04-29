@@ -30,7 +30,7 @@ jobs:
 
       - run: chmod 644 image.tar
 
-      - name: Ensure ~/tg_echo существует
+      - name: Ensure ~/tg_echo already exists
         uses: appleboy/ssh-action@v1.0.3
         with:
           host:     ${{ vars.SSH_HOST }}
