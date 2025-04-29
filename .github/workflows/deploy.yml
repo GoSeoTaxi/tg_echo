@@ -1,63 +1,89 @@
 name: build-and-deploy
+
 on:
   push:
     branches: [ main, dev ]
 
 env:
   IMAGE_NAME: tg_echo
-  PORT: ${{ vars.PORT }}
+  PORT:        ${{ vars.PORT }}
+  LOG_LEVEL:   ${{ vars.LOG_LEVEL }}
+  SERVICE_IP:  ${{ vars.SERVICE_IP }}
+  SSH_HOST:    ${{ vars.SSH_HOST }}
+  SSH_PORT:    ${{ vars.SSH_PORT }}
+  SSH_USER:    ${{ vars.SSH_USER }}
 
 jobs:
-  build:
+  build-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - uses: docker/build-push-action@v5
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v5
         with:
           context: .
           tags: ${{ env.IMAGE_NAME }}:latest
           load: true
 
-      - run: docker save ${{ env.IMAGE_NAME }}:latest -o image.tar
+      - name: Save image to tar
+        run: docker save ${{ env.IMAGE_NAME }}:latest -o image.tar
 
-      - name: Fix permissions for image.tar
+
+      - name: Fix permissions so scp can read the tar
         run: chmod 644 image.tar
 
       - name: Ensure remote dir exists
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${SSH_HOST}
+          port: ${SSH_PORT}
+          username: ${SSH_USER}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: mkdir -p ~/tg_echo
 
-      - name: Copy to VPS
+      - name: Copy image to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${SSH_HOST}
+          port: ${SSH_PORT}
+          username: ${SSH_USER}
+          password: ${{ secrets.SSH_PASSWORD }}
           source: image.tar
           target: ~/tg_echo/
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${SSH_HOST}
+          port: ${SSH_PORT}
+          username: ${SSH_USER}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: |
+            set -e
             cd ~/tg_echo
+            
+            echo "==> load image"
             docker load -i image.tar
+            
+            echo "==> stop old container"
             docker rm -f tg_echo || true
+            
+            echo "==> run new container, listens ${PORT} and publishes on [${SERVICE_IP}]"
             docker run -d --name tg_echo --restart=unless-stopped \
               -e BOT_TOKEN='${{ secrets.BOT_TOKEN }}' \
               -e CHAT_ID='${{ secrets.CHAT_ID }}' \
-              -e PORT='${{ vars.PORT }}' \
-              -e LOG_LEVEL='${{ vars.LOG_LEVEL }}' \
-              -p ${{ vars.PORT }}:${{ vars.PORT }} \
+              -e PORT='8080' \
+              -e LOG_LEVEL='${LOG_LEVEL}' \
+              --publish "[${SERVICE_IP}]:${PORT}:8080" \
               tg_echo:latest
+            
+            echo "🟢 tg_echo redeployed to [${SERVICE_IP}]:${PORT}"
