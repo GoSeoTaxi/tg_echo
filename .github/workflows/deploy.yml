@@ -3,6 +3,7 @@ name: build-and-deploy
 on:
   push:
     branches: [ main, dev ]
+  workflow_dispatch: {}
 
 env:
   IMAGE_NAME: tg_echo
